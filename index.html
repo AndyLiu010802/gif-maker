@@ -1,0 +1,979 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Banner Editor</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; background:#1a1d23; color:#ccc; font:14px "Segoe UI","Microsoft YaHei",sans-serif; }
+  #toolbar { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; padding:10px 16px; background:#22262e; border-bottom:1px solid #333; }
+  #toolbar label { display:flex; align-items:center; gap:6px; font-size:13px; color:#9aa4b2; }
+  #main { display:flex; gap:16px; padding:16px; align-items:flex-start; }
+  #stage { flex:1; min-width:0; }
+  #canvasWrap { overflow:auto; padding:24px; background:#14161b; border:1px solid #333; border-radius:8px; }
+  canvas#c { display:block; margin:0 auto; box-shadow:0 0 0 1px #333; cursor:default; }
+  #transport { display:flex; gap:10px; align-items:center; margin-top:12px; }
+  #scrub { flex:1; }
+  #side { width:300px; flex-shrink:0; }
+  .panel { background:#22262e; border:1px solid #333; border-radius:8px; padding:12px; margin-bottom:12px; }
+  .panel h3 { margin:0 0 8px; font-size:13px; color:#9aa4b2; font-weight:600; }
+  #addRow { display:flex; gap:6px; flex-wrap:wrap; }
+  button { background:#2a3140; color:#eee; border:1px solid #3a4150; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:13px; }
+  button:hover { background:#343c4e; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.primary { background:#4f8ef7; border-color:#4f8ef7; color:#fff; }
+  .item { display:flex; align-items:center; gap:4px; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .item.sel { background:#31405e; }
+  .item .lbl { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item button { padding:1px 6px; font-size:12px; }
+  .row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+  .row > span { width:72px; flex-shrink:0; font-size:12px; color:#9aa4b2; }
+  .row input[type=number] { width:64px; }
+  .row input[type=text], .row select { flex:1; min-width:0; }
+  input, select { background:#14161b; color:#eee; border:1px solid #3a4150; border-radius:4px; padding:4px 6px; font-size:13px; }
+  input[type=color] { padding:1px; width:40px; height:26px; }
+  input[type=number] { width:70px; }
+  #status { font-size:13px; }
+  #status.over { color:#ff6b6b; } #status.ok { color:#51cf66; }
+  .hint { font-size:12px; color:#6b7280; margin-top:6px; line-height:1.5; }
+</style>
+
+<div id="toolbar">
+  <label>Size
+    <select id="preset">
+      <option value="728,90">Leaderboard 728×90</option>
+      <option value="472,114">EASA 472×114</option>
+      <option value="160,600">Skyscraper 160×600</option>
+      <option value="300,600">Half Page 300×600</option>
+      <option value="1280,320">README 1280×320</option>
+    </select>
+  </label>
+  <label>W <input id="w" type="number" min="10"></label>
+  <label>H <input id="h" type="number" min="10"></label>
+  <label>Duration (s) <input id="duration" type="number" step="0.1" min="0.2"></label>
+  <label>End hold (s) <input id="hold" type="number" step="0.1" min="0"></label>
+  <label>FPS <input id="fps" type="number" min="5" max="30"></label>
+  <label><input id="loop" type="checkbox"> Loop</label>
+  <label>BG <input id="bg" type="color"></label>
+  <label><input id="border" type="checkbox"> 1px #CCCCCC border</label>
+  <label>Click URL (clickTag) <input id="clickurl" type="text" style="width:220px" placeholder="https://banner 点击后跳转的页面"></label>
+  <button id="reset">Reset demo</button>
+</div>
+
+<div id="main">
+  <div id="stage">
+    <div id="canvasWrap"><canvas id="c"></canvas></div>
+    <div id="transport">
+      <button id="play">⏸ Pause</button>
+      <input id="scrub" type="range" min="0" max="1000" value="0">
+      <span id="time" style="font-size:12px;color:#9aa4b2;white-space:nowrap">0.00 / 0.00 s</span>
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#9aa4b2;white-space:nowrap">
+        Max <input id="maxkb" type="number" min="0" style="width:56px"> kb</label>
+      <button id="exportGif" class="primary">Export GIF</button>
+      <button id="exportPng">Export PNG (current frame)</button>
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#9aa4b2;white-space:nowrap">
+        <input id="singlefile" type="checkbox"> single-file</label>
+      <button id="exportHtml5">Export HTML5 (zip)</button>
+      <span id="status"></span>
+    </div>
+    <div class="hint">Drag the timeline to inspect any frame; drag elements directly on the canvas to reposition them. Dragging snaps to center lines (pink guides) — hold Alt to disable. Images/shapes: the corner handle resizes proportionally (images; Shift = free), the edge handles stretch width or height alone. The EASA spec requires a static image — use "Export PNG".</div>
+  </div>
+  <div id="side">
+    <div class="panel">
+      <h3>Add element</h3>
+      <div id="addRow">
+        <button id="addText">+ Text</button>
+        <button id="addImage">+ Image</button>
+        <button id="addRect">+ Shape</button>
+        <button id="addBars">+ Bar chart</button>
+        <input id="file" type="file" accept="image/*" style="display:none">
+      </div>
+    </div>
+    <div class="panel"><h3>Elements (lower = on top)</h3><div id="list"></div></div>
+    <div class="panel"><h3>Properties</h3><div id="props"><div class="hint">Select an element to edit it</div></div></div>
+  </div>
+</div>
+
+<script type="module">
+import { GIFEncoder, quantize, applyPalette }
+  from 'https://unpkg.com/gifenc@1.0.3/dist/gifenc.esm.js';
+import { zipSync, strToU8 }
+  from 'https://unpkg.com/fflate@0.8.2/esm/browser.js';
+
+const $ = id => document.getElementById(id);
+const clamp = (x, a, b) => Math.max(a, Math.min(x, b));
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+const ANIMS = [
+  ['none', 'None'], ['fade', 'Fade in'], ['fade-up', 'Fade up'], ['fade-down', 'Fade down'],
+  ['fade-left', 'Fade left'], ['fade-right', 'Fade right'], ['grow', 'Grow (scale)'],
+  ['move', 'Move from start point'], ['move-fade', 'Move from start + fade'],
+];
+const ANIMS_OUT = [
+  ['none', 'None (stays visible)'], ['fade', 'Fade out'], ['fade-up', 'Fade out upward'],
+  ['fade-down', 'Fade out downward'], ['fade-left', 'Fade out to the left'], ['fade-right', 'Fade out to the right'],
+];
+
+function demoState() {
+  return {
+    w: 728, h: 90, duration: 2.4, hold: 1.4, fps: 15, loop: true, bg: '#0e1116', border: false, maxKb: 80,
+    elements: [
+      { id: uid(), type: 'text', text: 'Report Designer', x: 24, y: 42, size: 26, weight: '600', color: '#ffffff',
+        anim: { type: 'fade-up', delay: 0, dur: 0.72, dist: 10 } },
+      { id: uid(), type: 'text', text: 'Build beautiful reports in your browser', x: 24, y: 68, size: 14, weight: '600', color: '#8b95a5',
+        anim: { type: 'fade-up', delay: 0.36, dur: 0.72, dist: 8 } },
+      { id: uid(), type: 'rect', x: 412, y: 28, w: 110, h: 34, radius: 17, color: '#4f8ef7',
+        anim: { type: 'fade-up', delay: 0.84, dur: 0.72, dist: 8 } },
+      { id: uid(), type: 'text', text: 'Try it free', x: 434, y: 50, size: 14, weight: '600', color: '#ffffff',
+        anim: { type: 'fade-up', delay: 0.84, dur: 0.72, dist: 8 } },
+      { id: uid(), type: 'bars', x: 566, y: 76, values: [45, 75, 55, 95, 65], barW: 20, gap: 10, maxH: 62,
+        color: '#2a3140', accentColor: '#4f8ef7', accentIndex: 3,
+        anim: { type: 'grow', delay: 0, dur: 1.2, dist: 0 }, stagger: 0.19 },
+    ],
+  };
+}
+
+let state;
+try { state = JSON.parse(localStorage.getItem('banner-editor') || ''); if (!state.elements) throw 0; }
+catch { state = demoState(); }
+state.maxKb ??= 80;        // 旧存档没有这个字段;缺了会导致压缩阶梯不启动
+state.clickUrl ??= 'https://www.example.com';
+state.singleFile ??= false;
+
+let sel = null;            // 选中元素 id
+let playing = true;
+let exporting = false;     // 导出期间暂停预览渲染,避免和编码互相干扰
+let phase = 0;             // 当前播放到的秒数(0 ~ duration+hold)
+const imgCache = new Map();
+
+const canvas = $('c');
+const ctx = canvas.getContext('2d');
+let SS = 1;                // 预览超采样倍数(按屏幕 DPR),让预览清晰
+
+function resizeCanvas() {
+  SS = Math.max(window.devicePixelRatio || 1, 1);
+  canvas.width = Math.round(state.w * SS);
+  canvas.height = Math.round(state.h * SS);
+  canvas.style.width = state.w + 'px';
+  canvas.style.height = state.h + 'px';
+}
+
+let saveTimer;
+function touch() {         // 任何修改后调用:自动保存
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem('banner-editor', JSON.stringify(state));
+    } catch {
+      const s = $('status');
+      s.textContent = '⚠ Design too large to auto-save — it will be lost on refresh. Use smaller images.';
+      s.className = 'over';
+    }
+  }, 300);
+}
+
+// ---------- 渲染 ----------
+function fontOf(el) { return `${el.weight} ${el.size}px "Segoe UI","Microsoft YaHei",sans-serif`; }
+
+// 文字内联标记:**粗体**、{#hex 变色},解析成分段依次绘制
+function parseRuns(text) {
+  const runs = [];
+  const re = /\{(#[0-9a-fA-F]{3,8})\s([^}]*)\}/g;
+  let idx = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > idx) pushBoldRuns(runs, text.slice(idx, m.index), null);
+    pushBoldRuns(runs, m[2], m[1]);
+    idx = m.index + m[0].length;
+  }
+  if (idx < text.length) pushBoldRuns(runs, text.slice(idx), null);
+  return runs;
+}
+function pushBoldRuns(runs, text, color) {
+  const parts = text.split('**');
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i]) runs.push({ text: parts[i], bold: i % 2 === 1, color });
+  }
+}
+function runFont(el, r) { return `${r.bold ? 700 : el.weight} ${el.size}px "Segoe UI","Microsoft YaHei",sans-serif`; }
+function textWidth(c, el) {
+  let w = 0;
+  for (const r of parseRuns(el.text)) { c.font = runFont(el, r); w += c.measureText(r.text).width; }
+  return w;
+}
+
+function getImg(el) {
+  let im = imgCache.get(el.id);
+  if (!im) { im = new Image(); im.src = el.src; imgCache.set(el.id, im); }
+  return im;
+}
+
+// 导出压缩用:照片降采样再放大(低通滤波),去掉噪点让 GIF 压得动
+let renderImgQ = 1;                // 1 = 原样;<1 = 导出时对图片柔化
+let softCache = new Map();
+function softImg(el, im) {
+  const key = `${el.id}|${renderImgQ}|${el.w}x${el.h}`;
+  let cc = softCache.get(key);
+  if (!cc) {
+    cc = document.createElement('canvas');
+    cc.width = Math.max(Math.round(el.w * renderImgQ), 1);
+    cc.height = Math.max(Math.round(el.h * renderImgQ), 1);
+    cc.getContext('2d').drawImage(im, 0, 0, cc.width, cc.height);
+    softCache.set(key, cc);
+  }
+  return cc;
+}
+
+function boundsOf(el, c = ctx) {
+  if (el.type === 'text') {
+    return { x: el.x, y: el.y - el.size, w: textWidth(c, el), h: el.size * 1.25 };
+  }
+  if (el.type === 'bars') {
+    const w = el.values.length * (el.barW + el.gap) - el.gap;
+    return { x: el.x, y: el.y - el.maxH, w, h: el.maxH };
+  }
+  return { x: el.x, y: el.y, w: el.w, h: el.h };   // rect / image
+}
+
+function drawEl(c, el, t) {
+  const time = t * state.duration;
+  const a = el.anim || { type: 'none' };
+  const p = a.type === 'none' ? 1 : easeOut(clamp((time - a.delay) / (a.dur || 0.01), 0, 1));
+  let dx = 0, dy = 0, alpha = 1, scale = 1;
+  switch (a.type) {
+    case 'fade':       alpha = p; break;
+    case 'fade-up':    alpha = p; dy =  (1 - p) * a.dist; break;
+    case 'fade-down':  alpha = p; dy = -(1 - p) * a.dist; break;
+    case 'fade-left':  alpha = p; dx =  (1 - p) * a.dist; break;
+    case 'fade-right': alpha = p; dx = -(1 - p) * a.dist; break;
+    case 'grow':       scale = p; break;
+    case 'move':       dx = ((a.fromX ?? el.x) - el.x) * (1 - p); dy = ((a.fromY ?? el.y) - el.y) * (1 - p); break;
+    case 'move-fade':  alpha = p; dx = ((a.fromX ?? el.x) - el.x) * (1 - p); dy = ((a.fromY ?? el.y) - el.y) * (1 - p); break;
+  }
+  const ex = el.exit;                 // 退场:从 ex.start 秒开始,ex.dur 秒内淡出
+  if (ex && ex.type !== 'none') {
+    const q = easeOut(clamp((time - ex.start) / (ex.dur || 0.01), 0, 1));
+    alpha *= 1 - q;
+    switch (ex.type) {
+      case 'fade-up':    dy -= q * ex.dist; break;
+      case 'fade-down':  dy += q * ex.dist; break;
+      case 'fade-left':  dx -= q * ex.dist; break;
+      case 'fade-right': dx += q * ex.dist; break;
+    }
+  }
+  c.save();
+  c.globalAlpha = alpha;
+  c.translate(dx, dy);
+  if (scale !== 1 && el.type !== 'bars') {
+    const b = boundsOf(el, c), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    c.translate(cx, cy); c.scale(Math.max(scale, 0.001), Math.max(scale, 0.001)); c.translate(-cx, -cy);
+  }
+  if (el.type === 'text') {
+    let tx = el.x;
+    for (const r of parseRuns(el.text)) {
+      c.font = runFont(el, r);
+      c.fillStyle = r.color || el.color;
+      c.fillText(r.text, tx, el.y);
+      tx += c.measureText(r.text).width;
+    }
+  } else if (el.type === 'rect') {
+    c.fillStyle = el.color;
+    c.beginPath(); c.roundRect(el.x, el.y, el.w, el.h, el.radius); c.fill();
+  } else if (el.type === 'image') {
+    const im = getImg(el);
+    if (im.complete && im.naturalWidth) {
+      c.drawImage(renderImgQ < 1 ? softImg(el, im) : im, el.x, el.y, el.w, el.h);
+    }
+  } else if (el.type === 'bars') {
+    el.values.forEach((v, i) => {
+      const pi = a.type === 'none' ? 1
+        : easeOut(clamp((time - a.delay - i * el.stagger) / (a.dur || 0.01), 0, 1));
+      const barH = v / 100 * el.maxH * pi;
+      c.fillStyle = i === el.accentIndex ? el.accentColor : el.color;
+      c.fillRect(el.x + i * (el.barW + el.gap), el.y - barH, el.barW, barH);
+    });
+  }
+  c.restore();
+}
+
+function render(c, t) {
+  c.fillStyle = state.bg;
+  c.fillRect(0, 0, state.w, state.h);
+  for (const el of state.elements) drawEl(c, el, t);
+  if (state.border) {                  // 规格要求:白底 banner 必须有 1px #CCCCCC 边框
+    c.strokeStyle = '#CCCCCC';
+    c.lineWidth = 1;
+    c.strokeRect(0.5, 0.5, state.w - 1, state.h - 1);
+  }
+}
+
+function frame(now) {
+  if (frame.last === undefined) frame.last = now;
+  const dt = (now - frame.last) / 1000; frame.last = now;
+  if (exporting) { requestAnimationFrame(frame); return; }
+  const cycle = state.duration + state.hold;
+  if (playing) {
+    phase = (phase + dt) % cycle;
+    $('scrub').value = Math.round(clamp(phase / state.duration, 0, 1) * 1000);
+  }
+  const t = clamp(phase / state.duration, 0, 1);
+  $('time').textContent = `${(t * state.duration).toFixed(2)} / ${state.duration.toFixed(2)} s`;
+  ctx.setTransform(SS, 0, 0, SS, 0, 0);
+  render(ctx, t);
+  const el = state.elements.find(e => e.id === sel);
+  if (el) {                              // 选中框(只画在预览上,不进导出)
+    const b = boundsOf(el);
+    ctx.strokeStyle = '#4f8ef7'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8);
+    if ((el.type === 'image' || el.type === 'rect') && !el.locked) {   // 缩放手柄:四边 + 右下角
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#4f8ef7';
+      for (const p of handlePoints(b)) ctx.fillRect(p.x - 3, p.y - 3, 7, 7);
+      ctx.setLineDash([4, 3]);
+    }
+    if (isMove(el)) {                    // 起点幽灵框 + 运动路径
+      const g = ghostBounds(el);
+      ctx.strokeStyle = '#f7b84f';
+      ctx.strokeRect(g.x, g.y, g.w, g.h);
+      ctx.beginPath();
+      ctx.moveTo(g.x + g.w / 2, g.y + g.h / 2);
+      ctx.lineTo(b.x + b.w / 2, b.y + b.h / 2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+  if (guides) {                          // 吸附参考线
+    ctx.strokeStyle = '#ff5fa2'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+    if (guides.gx != null) { ctx.beginPath(); ctx.moveTo(guides.gx, 0); ctx.lineTo(guides.gx, state.h); ctx.stroke(); }
+    if (guides.gy != null) { ctx.beginPath(); ctx.moveTo(0, guides.gy); ctx.lineTo(state.w, guides.gy); ctx.stroke(); }
+    ctx.setLineDash([]);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------- 画布拖拽 + 中线吸附 ----------
+let drag = null;
+let guides = null;                 // {gx, gy} 当前吸附到的参考线
+const SNAP = 5;
+
+function isMove(el) { return String(el.anim?.type || '').startsWith('move'); }
+function ghostBounds(el) {         // 起点幽灵框(move 动画的出发位置)
+  const b = boundsOf(el);
+  return { x: b.x + (el.anim.fromX ?? el.x) - el.x, y: b.y + (el.anim.fromY ?? el.y) - el.y, w: b.w, h: b.h };
+}
+function handlePoints(b) {         // 缩放手柄位置:四边中点 + 右下角
+  return [
+    { dir: 'se', x: b.x + b.w + 4, y: b.y + b.h + 4 },
+    { dir: 'e',  x: b.x + b.w + 4, y: b.y + b.h / 2 },
+    { dir: 'w',  x: b.x - 4,       y: b.y + b.h / 2 },
+    { dir: 's',  x: b.x + b.w / 2, y: b.y + b.h + 4 },
+    { dir: 'n',  x: b.x + b.w / 2, y: b.y - 4 },
+  ];
+}
+function hitHandle(b, mx, my) {
+  for (const p of handlePoints(b)) {
+    if (Math.abs(mx - p.x) <= 7 && Math.abs(my - p.y) <= 7) return p.dir;
+  }
+  return null;
+}
+function snapTo(b, excludeId) {    // 中心对中心吸附:画布中线 + 其他元素中线
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  const txs = [state.w / 2], tys = [state.h / 2];
+  for (const o of state.elements) {
+    if (o.id === excludeId) continue;
+    const ob = boundsOf(o);
+    txs.push(ob.x + ob.w / 2); tys.push(ob.y + ob.h / 2);
+  }
+  const res = { ax: 0, ay: 0, gx: null, gy: null };
+  let best = SNAP;
+  for (const t of txs) if (Math.abs(t - cx) < best) { best = Math.abs(t - cx); res.ax = t - cx; res.gx = t; }
+  best = SNAP;
+  for (const t of tys) if (Math.abs(t - cy) < best) { best = Math.abs(t - cy); res.ay = t - cy; res.gy = t; }
+  return res;
+}
+function mouse(e) {
+  const r = canvas.getBoundingClientRect();
+  return [(e.clientX - r.left) * state.w / r.width, (e.clientY - r.top) * state.h / r.height];
+}
+
+canvas.addEventListener('pointerdown', e => {
+  const [mx, my] = mouse(e);
+  const cur = state.elements.find(el => el.id === sel);
+  if (cur && !cur.locked && (cur.type === 'image' || cur.type === 'rect')) {   // 缩放手柄优先
+    const dir = hitHandle(boundsOf(cur), mx, my);
+    if (dir) {
+      drag = { el: cur, mode: 'resize', dir, x0: cur.x, y0: cur.y, w0: cur.w, h0: cur.h, aspect: cur.w / (cur.h || 1) };
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+  }
+  if (cur && !cur.locked && isMove(cur)) {   // 再看是否点中了起点幽灵框
+    const g = ghostBounds(cur);
+    if (mx >= g.x && mx <= g.x + g.w && my >= g.y && my <= g.y + g.h) {
+      drag = { el: cur, mode: 'ghost', ox: mx - (cur.anim.fromX ?? cur.x), oy: my - (cur.anim.fromY ?? cur.y) };
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+  }
+  for (let i = state.elements.length - 1; i >= 0; i--) {
+    const el = state.elements[i];
+    if (el.locked) continue;                 // 锁定的元素画布上点不中
+    const b = boundsOf(el);
+    if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
+      sel = el.id;
+      drag = { el, mode: 'el', ox: mx - el.x, oy: my - el.y };
+      canvas.setPointerCapture(e.pointerId);
+      refreshSide();
+      return;
+    }
+  }
+  sel = null; refreshSide();
+});
+canvas.addEventListener('pointermove', e => {
+  const [mx, my] = mouse(e);
+  if (!drag) {                     // 悬停时按位置切换光标提示
+    let cursor = 'default';
+    const cur = state.elements.find(el => el.id === sel);
+    if (cur && !cur.locked && (cur.type === 'image' || cur.type === 'rect')) {
+      const d = hitHandle(boundsOf(cur), mx, my);
+      if (d) cursor = { e: 'ew-resize', w: 'ew-resize', n: 'ns-resize', s: 'ns-resize', se: 'nwse-resize' }[d];
+    }
+    if (cursor === 'default') {
+      for (let i = state.elements.length - 1; i >= 0; i--) {
+        const o = state.elements[i];
+        if (o.locked) continue;
+        const b = boundsOf(o);
+        if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) { cursor = 'move'; break; }
+      }
+    }
+    canvas.style.cursor = cursor;
+    return;
+  }
+  const el = drag.el;
+  guides = null;
+  if (drag.mode === 'resize') {
+    const right = drag.x0 + drag.w0, bottom = drag.y0 + drag.h0;
+    switch (drag.dir) {
+      case 'e': el.w = Math.max(Math.round(mx - el.x), 4); break;                 // 右边:只改宽
+      case 's': el.h = Math.max(Math.round(my - el.y), 4); break;                 // 下边:只改高
+      case 'w': el.x = Math.min(Math.round(mx), right - 4); el.w = right - el.x; break;   // 左边:改 x 和宽
+      case 'n': el.y = Math.min(Math.round(my), bottom - 4); el.h = bottom - el.y; break; // 上边:改 y 和高
+      case 'se':
+        el.w = Math.max(Math.round(mx - el.x), 4);
+        el.h = Math.max(Math.round(my - el.y), 4);
+        if (el.type === 'image' && !e.shiftKey) {  // 角手柄:图片默认锁比例,Shift 自由
+          el.h = Math.max(Math.round(el.w / drag.aspect), 1);
+        }
+        break;
+    }
+    return;
+  }
+  if (drag.mode === 'ghost') {
+    el.anim.fromX = Math.round(mx - drag.ox);
+    el.anim.fromY = Math.round(my - drag.oy);
+    if (!e.altKey) {
+      const s = snapTo(ghostBounds(el), el.id);
+      el.anim.fromX += s.ax; el.anim.fromY += s.ay;
+      guides = s;
+    }
+  } else {
+    el.x = Math.round(mx - drag.ox);
+    el.y = Math.round(my - drag.oy);
+    if (!e.altKey) {
+      const s = snapTo(boundsOf(el), el.id);
+      el.x += s.ax; el.y += s.ay;
+      guides = s;
+    }
+  }
+});
+canvas.addEventListener('pointerup', () => {
+  if (drag) { drag = null; guides = null; touch(); refreshSide(); }
+});
+
+// ---------- 侧边栏 ----------
+function labelOf(el) {
+  if (el.type === 'text') return `Text “${el.text.slice(0, 14)}”`;
+  return { image: 'Image', rect: 'Shape', bars: 'Bar chart' }[el.type];
+}
+
+function refreshSide() { renderList(); renderProps(); }
+
+function renderList() {
+  const box = $('list'); box.innerHTML = '';
+  state.elements.forEach((el, i) => {
+    const div = document.createElement('div');
+    div.className = 'item' + (el.id === sel ? ' sel' : '');
+    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = labelOf(el);
+    if (el.locked) lbl.style.opacity = '0.55';
+    div.append(lbl);
+    const mk = (txt, fn) => { const b = document.createElement('button'); b.textContent = txt;
+      b.onclick = ev => { ev.stopPropagation(); fn(); touch(); refreshSide(); }; div.append(b); };
+    mk(el.locked ? '🔒' : '🔓', () => el.locked = !el.locked);
+    mk('↑', () => { if (i > 0) [state.elements[i-1], state.elements[i]] = [state.elements[i], state.elements[i-1]]; });
+    mk('↓', () => { if (i < state.elements.length-1) [state.elements[i+1], state.elements[i]] = [state.elements[i], state.elements[i+1]]; });
+    mk('✕', () => { state.elements.splice(i, 1); if (sel === el.id) sel = null; });
+    div.onclick = () => { sel = el.id; refreshSide(); };
+    box.append(div);
+  });
+}
+
+function row(label, ...ctrls) {
+  const d = document.createElement('div'); d.className = 'row';
+  const s = document.createElement('span'); s.textContent = label;
+  d.append(s, ...ctrls); return d;
+}
+function inp(type, value, on, attrs = {}) {
+  const i = document.createElement('input'); i.type = type;
+  if (type === 'checkbox') i.checked = value; else i.value = value;
+  Object.assign(i, attrs);
+  i.addEventListener('input', () => {
+    on(type === 'number' ? (parseFloat(i.value) || 0) : type === 'checkbox' ? i.checked : i.value);
+    touch();
+  });
+  return i;
+}
+function selInp(options, value, on) {
+  const s = document.createElement('select');
+  for (const [v, txt] of options) { const o = document.createElement('option'); o.value = v; o.textContent = txt; s.append(o); }
+  s.value = value;
+  s.addEventListener('input', () => { on(s.value); touch(); });
+  return s;
+}
+
+function renderProps() {
+  const box = $('props'); box.innerHTML = '';
+  const el = state.elements.find(e => e.id === sel);
+  if (!el) { box.innerHTML = '<div class="hint">Select an element to edit it</div>'; return; }
+
+  box.append(row('Position x / y',
+    inp('number', el.x, v => el.x = v), inp('number', el.y, v => el.y = v)));
+
+  if (el.type === 'text') {
+    const markTip = document.createElement('div'); markTip.className = 'hint';
+    markTip.textContent = 'Inline styling: **bold**, {#ff5252 colored}. Example: Request an **appraisal** {#4f8ef7 today}';
+    box.append(
+      row('Text', inp('text', el.text, v => { el.text = v; renderList(); })),
+      markTip,
+      row('Font size', inp('number', el.size, v => el.size = v)),
+      row('Weight', selInp([['400','Regular'],['600','Semibold'],['700','Bold']], el.weight, v => el.weight = v)),
+      row('Color', inp('color', el.color, v => el.color = v)),
+    );
+  } else if (el.type === 'rect') {
+    box.append(
+      row('W / H', inp('number', el.w, v => el.w = v), inp('number', el.h, v => el.h = v)),
+      row('Radius', inp('number', el.radius, v => el.radius = v)),
+      row('Color', inp('color', el.color, v => el.color = v)),
+    );
+  } else if (el.type === 'image') {
+    box.append(row('W / H', inp('number', el.w, v => el.w = v), inp('number', el.h, v => el.h = v)));
+    const btn = document.createElement('button'); btn.textContent = 'Replace image…';
+    btn.onclick = () => pickImage(f => { el.src = f; imgCache.delete(el.id); touch(); });
+    box.append(row('Image', btn));
+  } else if (el.type === 'bars') {
+    box.append(
+      row('Values (0-100)', inp('text', el.values.join(','), v => {
+        el.values = v.split(',').map(s => clamp(parseFloat(s) || 0, 0, 100)); })),
+      row('Bar W / gap', inp('number', el.barW, v => el.barW = v), inp('number', el.gap, v => el.gap = v)),
+      row('Max height', inp('number', el.maxH, v => el.maxH = v)),
+      row('Color', inp('color', el.color, v => el.color = v)),
+      row('Accent color', inp('color', el.accentColor, v => el.accentColor = v)),
+      row('Accent index', inp('number', el.accentIndex, v => el.accentIndex = Math.round(v), { min: -1 })),
+      row('Stagger (s)', inp('number', el.stagger, v => el.stagger = v, { step: 0.05 })),
+    );
+  }
+
+  const h = document.createElement('h3'); h.textContent = 'Entrance animation'; h.style.marginTop = '12px';
+  box.append(h,
+    row('Animation', selInp(ANIMS, el.anim.type, v => {
+      el.anim.type = v;
+      if (v.startsWith('move') && el.anim.fromX == null) {
+        el.anim.fromX = el.x - 60; el.anim.fromY = el.y;
+      }
+      renderProps();
+    })),
+    row('Delay (s)', inp('number', el.anim.delay, v => el.anim.delay = v, { step: 0.1, min: 0 })),
+    row('Duration (s)', inp('number', el.anim.dur, v => el.anim.dur = v, { step: 0.1, min: 0.05 })),
+  );
+  if (el.anim.type.startsWith('fade-')) {
+    box.append(row('Slide distance', inp('number', el.anim.dist, v => el.anim.dist = v)));
+  }
+  if (el.anim.type.startsWith('move')) {
+    box.append(row('Start x / y',
+      inp('number', el.anim.fromX ?? el.x, v => el.anim.fromX = v),
+      inp('number', el.anim.fromY ?? el.y, v => el.anim.fromY = v)));
+    const btn = document.createElement('button'); btn.textContent = 'Set start = end position';
+    btn.onclick = () => { el.anim.fromX = el.x; el.anim.fromY = el.y; touch(); renderProps(); };
+    box.append(row('Start point', btn));
+    const tip = document.createElement('div'); tip.className = 'hint';
+    tip.textContent = 'The orange dashed box on the canvas is the start point — drag it directly. The element travels from it to its position (x/y) during the animation.';
+    box.append(tip);
+  }
+
+  if (!el.exit) el.exit = { type: 'none', start: Math.max(state.duration - 0.6, 0), dur: 0.4, dist: 10 };
+  const h2 = document.createElement('h3'); h2.textContent = 'Exit animation'; h2.style.marginTop = '12px';
+  const exitWarn = document.createElement('div');
+  exitWarn.className = 'hint'; exitWarn.style.color = '#f7b84f';
+  const updExitWarn = () => {
+    exitWarn.textContent = (el.exit.type !== 'none' && el.exit.start + el.exit.dur > state.duration + 1e-9)
+      ? `⚠ Ends at ${(el.exit.start + el.exit.dur).toFixed(2)}s but the animation stops at ${state.duration}s — it will freeze mid-fade. Lower Start/Duration or raise the banner Duration.`
+      : '';
+  };
+  box.append(h2,
+    row('Animation', selInp(ANIMS_OUT, el.exit.type, v => { el.exit.type = v; renderProps(); })),
+    row('Start at (s)', inp('number', el.exit.start, v => { el.exit.start = v; updExitWarn(); }, { step: 0.05, min: 0 })),
+    row('Duration (s)', inp('number', el.exit.dur, v => { el.exit.dur = v; updExitWarn(); }, { step: 0.05, min: 0.05 })),
+  );
+  if (el.exit.type.startsWith('fade-')) {
+    box.append(row('Slide distance', inp('number', el.exit.dist, v => el.exit.dist = v)));
+  }
+  updExitWarn();
+  box.append(exitWarn);
+}
+
+// ---------- 添加元素 ----------
+function addEl(el) { state.elements.push(el); sel = el.id; touch(); refreshSide(); }
+$('addText').onclick = () => addEl({ id: uid(), type: 'text', text: 'Edit me in the panel', x: 40, y: Math.round(state.h/2), size: 20, weight: '600', color: '#ffffff', anim: { type: 'fade-up', delay: 0, dur: 0.6, dist: 10 } });
+$('addRect').onclick = () => addEl({ id: uid(), type: 'rect', x: 40, y: 20, w: 120, h: 40, radius: 8, color: '#4f8ef7', anim: { type: 'fade', delay: 0, dur: 0.6, dist: 0 } });
+$('addBars').onclick = () => addEl({ id: uid(), type: 'bars', x: 40, y: state.h - 14, values: [45,75,55,95,65], barW: 16, gap: 8, maxH: Math.round(state.h*0.6), color: '#2a3140', accentColor: '#4f8ef7', accentIndex: 3, stagger: 0.19, anim: { type: 'grow', delay: 0, dur: 1.2, dist: 0 } });
+
+let filePick = null;
+function pickImage(cb) { filePick = cb; $('file').value = ''; $('file').click(); }
+$('file').onchange = () => {
+  const f = $('file').files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      // 压缩:最多 banner 尺寸的 2 倍就够清晰了;照片重编码为 JPEG,
+      // 否则 dataURL 动辄几 MB,会把 localStorage 撑爆导致设计丢失
+      const maxW = state.w * 2, maxH = state.h * 2;
+      const k = Math.min(1, maxW / im.naturalWidth, maxH / im.naturalHeight);
+      let src = rd.result;
+      if (k < 1 || f.size > 300 * 1024) {
+        const cc = document.createElement('canvas');
+        cc.width = Math.max(Math.round(im.naturalWidth * k), 1);
+        cc.height = Math.max(Math.round(im.naturalHeight * k), 1);
+        cc.getContext('2d').drawImage(im, 0, 0, cc.width, cc.height);
+        src = f.type === 'image/jpeg' ? cc.toDataURL('image/jpeg', 0.85) : cc.toDataURL('image/png');
+      }
+      if (filePick === 'new') {
+        const h = Math.min(im.naturalHeight, state.h * 0.8);
+        const w = Math.round(im.naturalWidth * h / im.naturalHeight);
+        addEl({ id: uid(), type: 'image', src, x: 20, y: Math.round((state.h - h)/2), w, h: Math.round(h), anim: { type: 'fade', delay: 0, dur: 0.6, dist: 0 } });
+      } else { filePick(src); refreshSide(); }
+    };
+    im.src = rd.result;
+  };
+  rd.readAsDataURL(f);
+};
+$('addImage').onclick = () => { filePick = 'new'; $('file').value = ''; $('file').click(); };
+
+// ---------- 工具栏 ----------
+function syncToolbar() {
+  $('w').value = state.w; $('h').value = state.h;
+  $('duration').value = state.duration; $('hold').value = state.hold;
+  $('fps').value = state.fps; $('loop').checked = state.loop; $('bg').value = state.bg;
+  $('border').checked = !!state.border;
+  $('maxkb').value = state.maxKb ?? 80;
+  $('clickurl').value = state.clickUrl ?? '';
+  $('singlefile').checked = !!state.singleFile;
+  $('preset').value = [...$('preset').options].some(o => o.value === `${state.w},${state.h}`) ? `${state.w},${state.h}` : $('preset').value;
+}
+$('preset').oninput = () => { const [w, h] = $('preset').value.split(',').map(Number); state.w = w; state.h = h; resizeCanvas(); syncToolbar(); touch(); };
+$('w').oninput = () => { state.w = parseInt($('w').value) || state.w; resizeCanvas(); touch(); };
+$('h').oninput = () => { state.h = parseInt($('h').value) || state.h; resizeCanvas(); touch(); };
+$('duration').oninput = () => { state.duration = parseFloat($('duration').value) || state.duration; touch(); };
+$('hold').oninput = () => { state.hold = parseFloat($('hold').value) || 0; touch(); };
+$('fps').oninput = () => { state.fps = clamp(parseInt($('fps').value) || 15, 5, 30); touch(); };
+$('loop').oninput = () => { state.loop = $('loop').checked; touch(); };
+$('bg').oninput = () => {
+  state.bg = $('bg').value;
+  // 白色/近白背景时按规格自动勾上边框(仍可手动取消)
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(state.bg.slice(i, i + 2), 16));
+  if (r > 240 && g > 240 && b > 240 && !state.border) { state.border = true; $('border').checked = true; }
+  touch();
+};
+$('border').oninput = () => { state.border = $('border').checked; touch(); };
+$('maxkb').oninput = () => { state.maxKb = Math.max(parseFloat($('maxkb').value) || 0, 0); touch(); };
+$('clickurl').oninput = () => { state.clickUrl = $('clickurl').value.trim(); touch(); };
+$('singlefile').oninput = () => { state.singleFile = $('singlefile').checked; touch(); };
+$('reset').onclick = () => {
+  if (!confirm('Discard the current design and restore the demo?')) return;
+  state = demoState(); sel = null; imgCache.clear();
+  resizeCanvas(); syncToolbar(); refreshSide(); touch();
+};
+
+// ---------- 播放控制 ----------
+$('play').onclick = () => { playing = !playing; $('play').textContent = playing ? '⏸ Pause' : '▶ Play'; };
+$('scrub').oninput = () => {
+  playing = false; $('play').textContent = '▶ Play';
+  phase = $('scrub').value / 1000 * state.duration;
+};
+
+// ---------- 导出 ----------
+const status = $('status');
+async function encodeGif(colors, fps, imgQ = 1, onProgress) {
+  renderImgQ = imgQ;
+  const ec = document.createElement('canvas');   // 导出用 1:1 画布,保证像素精确
+  ec.width = state.w; ec.height = state.h;
+  const ectx = ec.getContext('2d', { willReadFrequently: true });
+  const gif = GIFEncoder();
+  const total = Math.round(state.duration * fps);
+  let prev = null;
+  for (let i = 0; i <= total; i++) {
+    if (onProgress && (i & 3) === 0) {       // 每 4 帧让出一次主线程,页面不冻结
+      onProgress(i, total);
+      await new Promise(r => setTimeout(r));
+      renderImgQ = imgQ;                     // 防止让出期间被其他逻辑改回
+    }
+    render(ectx, i / total);
+    const { data } = ectx.getImageData(0, 0, state.w, state.h);
+    const palette = quantize(data, Math.min(colors, 255));   // 留一个透明色槽位
+    const index = applyPalette(data, palette);
+    const opts = {
+      palette,
+      delay: i === total ? Math.max(state.hold * 1000, 1000 / fps) : 1000 / fps,
+      dispose: 1,                                  // 保留上一帧,配合透明像素做增量编码
+    };
+    if (i === 0) opts.repeat = state.loop ? 0 : -1;   // 0=无限循环, -1=只播一次
+    if (prev) {
+      // 帧间差分:和上一帧相同的像素标成透明,只真正编码变化的区域
+      const tIndex = palette.length;
+      palette.push([0, 0, 0]);
+      for (let p = 0, q = 0; p < index.length; p++, q += 4) {
+        if (data[q] === prev[q] && data[q + 1] === prev[q + 1] && data[q + 2] === prev[q + 2]) index[p] = tIndex;
+      }
+      opts.transparent = true;
+      opts.transparentIndex = tIndex;
+    }
+    gif.writeFrame(index, state.w, state.h, opts);
+    prev = data;
+  }
+  gif.finish();
+  renderImgQ = 1;                                // 预览恢复原图质量
+  return gif.bytes();
+}
+
+$('exportGif').onclick = async () => {
+  if (exporting) return;
+  exporting = true;
+  const btns = ['exportGif', 'exportPng', 'exportHtml5'].map($);
+  btns.forEach(b => b.disabled = true);
+  try {
+    const limit = state.maxKb ?? 0;
+    softCache = new Map();
+    // 压缩阶梯:先降色数(损失小)→ 柔化照片 → 降帧率
+    const hasPhoto = state.elements.some(e => e.type === 'image');
+    const ladder = [[256, state.fps, 1], [128, state.fps, 1], [64, state.fps, 1]];
+    if (hasPhoto) ladder.push([128, state.fps, 0.6], [64, state.fps, 0.6]);
+    for (const f of [12, 10, 8]) if (f < state.fps) ladder.push([64, f, hasPhoto ? 0.6 : 1]);
+    ladder.push([32, Math.min(state.fps, 8), hasPhoto ? 0.4 : 1]);
+
+    let best = null;                               // 全部超限时用最小的那个
+    for (let k = 0; k < ladder.length; k++) {
+      const [colors, fps, imgQ] = ladder[k];
+      const bytes = await encodeGif(colors, fps, imgQ, (i, total) => {
+        status.textContent = `Encoding… pass ${k + 1}/${ladder.length} (${colors} colors, ${fps} fps) — frame ${i}/${total}`;
+        status.className = '';
+      });
+      const kb = bytes.length / 1024;
+      if (!best || kb < best.kb) best = { bytes, kb, colors, fps, imgQ };
+      if (!limit || kb <= limit) { best = { bytes, kb, colors, fps, imgQ }; break; }
+    }
+    const parts = [];
+    if (best.colors !== 256) parts.push(`${best.colors} colors`);
+    if (best.fps !== state.fps) parts.push(`${best.fps} fps`);
+    if (best.imgQ !== 1) parts.push(`photos ${Math.round(best.imgQ * 100)}%`);
+    const note = parts.length ? ` (compressed: ${parts.join(', ')})` : '';
+    if (limit && best.kb > limit) {
+      status.textContent = `banner.gif — ${best.kb.toFixed(1)} kb, still over ${limit} kb — shorten Duration or remove/shrink photos`;
+      status.className = 'over';
+    } else {
+      status.textContent = `banner.gif — ${best.kb.toFixed(1)} kb${note}`;
+      status.className = 'ok';
+    }
+    download(new Blob([best.bytes], { type: 'image/gif' }), 'banner.gif');
+  } finally {
+    exporting = false;
+    renderImgQ = 1;
+    btns.forEach(b => b.disabled = false);
+  }
+};
+
+$('exportPng').onclick = () => {
+  const ec = document.createElement('canvas');
+  ec.width = state.w; ec.height = state.h;
+  render(ec.getContext('2d'), clamp(phase / state.duration, 0, 1));
+  ec.toBlob(b => {
+    status.textContent = `banner.png — ${(b.size/1024).toFixed(1)} kb`; status.className = 'ok';
+    download(b, 'banner.png');
+  }, 'image/png');
+};
+
+// ---------- 导出 HTML5 广告包(Google Ad Manager clickTag 规范)----------
+function buildAdHtml(inline = false) {
+  // subload 拆分:图片进 assets.js(页面 load 后异步加载),index.html 保持轻量
+  // inline=true 时不拆文件,图片数据直接写进 index.html(单文件交付)
+  const assets = {};
+  const elements = JSON.parse(JSON.stringify(state.elements));
+  for (const el of elements) {
+    if (el.type === 'image') { assets[el.id] = el.src; delete el.src; }
+  }
+  const hasAssets = Object.keys(assets).length > 0;
+  const cfg = {
+    w: state.w, h: state.h, duration: state.duration, hold: state.hold,
+    loop: !!state.loop, bg: state.bg, border: !!state.border,
+    elements,
+  };
+  // 转义脚本闭合标签,防止元素文字或数据破坏生成的 HTML 结构
+  const esc = s => s.replace(/<\//g, '<\\/');
+  const cfgJson = esc(JSON.stringify(cfg));
+  const clickUrl = String(state.clickUrl || 'https://www.example.com').replace(/"/g, '%22');
+  // 生成的广告:全部内联(无外部请求)、IIFE 无全局变量(clickTag 除外,规范要求)、
+  // rAF 限帧 24fps、不用 setInterval/setTimeout/eval、无 SVG 标签
+  const html = '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="utf-8">\n'
+    + '<meta name="ad.size" content="width=' + state.w + ',height=' + state.h + '">\n'
+    + '<style>html,body{margin:0;padding:0}a{display:block;width:' + state.w + 'px;height:' + state.h + 'px}canvas{display:block}</style>\n'
+    + '<script type="text/javascript">var clickTag = "' + clickUrl + '";<\/script>\n'
+    + '</head>\n<body>\n'
+    + '<a href="javascript:window.open(window.clickTag)">\n'
+    + '<canvas id="ad" width="' + state.w + '" height="' + state.h + '"></canvas>\n'
+    + '</a>\n'
+    + '<script type="text/javascript">\n(function () {\n"use strict";\n'
+    + 'var CFG = ' + cfgJson + ';\n'
+    + 'var canvas = document.getElementById("ad"), ctx = canvas.getContext("2d");\n'
+    + 'function easeOut(x) { return 1 - Math.pow(1 - x, 3); }\n'
+    + 'function clamp(x, a, b) { return Math.max(a, Math.min(x, b)); }\n'
+    + 'var imgs = {};\n'
+    + 'function parseRuns(t) {\n'
+    + '  var runs = [], re = /\\{(#[0-9a-fA-F]{3,8})\\s([^}]*)\\}/g, i = 0, m;\n'
+    + '  while ((m = re.exec(t))) { if (m.index > i) pushRuns(runs, t.slice(i, m.index), null); pushRuns(runs, m[2], m[1]); i = m.index + m[0].length; }\n'
+    + '  if (i < t.length) pushRuns(runs, t.slice(i), null);\n'
+    + '  return runs;\n'
+    + '}\n'
+    + 'function pushRuns(runs, t, color) { var p = t.split("**"); for (var i = 0; i < p.length; i++) { if (p[i]) runs.push({ text: p[i], bold: i % 2 === 1, color: color }); } }\n'
+    + 'function runFont(el, r) { return (r.bold ? 700 : el.weight) + " " + el.size + "px \\"Segoe UI\\",\\"Helvetica Neue\\",Arial,sans-serif"; }\n'
+    + 'function textWidth(el) { var w = 0, rs = parseRuns(el.text); for (var i = 0; i < rs.length; i++) { ctx.font = runFont(el, rs[i]); w += ctx.measureText(rs[i].text).width; } return w; }\n'
+    + 'function boundsOf(el) {\n'
+    + '  if (el.type === "text") { return { x: el.x, y: el.y - el.size, w: textWidth(el), h: el.size * 1.25 }; }\n'
+    + '  if (el.type === "bars") { return { x: el.x, y: el.y - el.maxH, w: el.values.length * (el.barW + el.gap) - el.gap, h: el.maxH }; }\n'
+    + '  return { x: el.x, y: el.y, w: el.w, h: el.h };\n'
+    + '}\n'
+    + 'function drawEl(el, t) {\n'
+    + '  var time = t * CFG.duration, a = el.anim || { type: "none" };\n'
+    + '  var p = a.type === "none" ? 1 : easeOut(clamp((time - a.delay) / (a.dur || 0.01), 0, 1));\n'
+    + '  var dx = 0, dy = 0, alpha = 1, scale = 1;\n'
+    + '  var fx = a.fromX == null ? el.x : a.fromX, fy = a.fromY == null ? el.y : a.fromY;\n'
+    + '  switch (a.type) {\n'
+    + '    case "fade": alpha = p; break;\n'
+    + '    case "fade-up": alpha = p; dy = (1 - p) * a.dist; break;\n'
+    + '    case "fade-down": alpha = p; dy = -(1 - p) * a.dist; break;\n'
+    + '    case "fade-left": alpha = p; dx = (1 - p) * a.dist; break;\n'
+    + '    case "fade-right": alpha = p; dx = -(1 - p) * a.dist; break;\n'
+    + '    case "grow": scale = p; break;\n'
+    + '    case "move": dx = (fx - el.x) * (1 - p); dy = (fy - el.y) * (1 - p); break;\n'
+    + '    case "move-fade": alpha = p; dx = (fx - el.x) * (1 - p); dy = (fy - el.y) * (1 - p); break;\n'
+    + '  }\n'
+    + '  var ex = el.exit;\n'
+    + '  if (ex && ex.type !== "none") {\n'
+    + '    var q = easeOut(clamp((time - ex.start) / (ex.dur || 0.01), 0, 1));\n'
+    + '    alpha *= 1 - q;\n'
+    + '    if (ex.type === "fade-up") dy -= q * ex.dist;\n'
+    + '    else if (ex.type === "fade-down") dy += q * ex.dist;\n'
+    + '    else if (ex.type === "fade-left") dx -= q * ex.dist;\n'
+    + '    else if (ex.type === "fade-right") dx += q * ex.dist;\n'
+    + '  }\n'
+    + '  ctx.save();\n'
+    + '  ctx.globalAlpha = alpha;\n'
+    + '  ctx.translate(dx, dy);\n'
+    + '  if (scale !== 1 && el.type !== "bars") {\n'
+    + '    var b = boundsOf(el), cx = b.x + b.w / 2, cy = b.y + b.h / 2;\n'
+    + '    ctx.translate(cx, cy); ctx.scale(Math.max(scale, 0.001), Math.max(scale, 0.001)); ctx.translate(-cx, -cy);\n'
+    + '  }\n'
+    + '  if (el.type === "text") { var rs = parseRuns(el.text), tx = el.x; for (var ri = 0; ri < rs.length; ri++) { ctx.font = runFont(el, rs[ri]); ctx.fillStyle = rs[ri].color || el.color; ctx.fillText(rs[ri].text, tx, el.y); tx += ctx.measureText(rs[ri].text).width; } }\n'
+    + '  else if (el.type === "rect") { ctx.fillStyle = el.color; ctx.beginPath(); ctx.roundRect(el.x, el.y, el.w, el.h, el.radius); ctx.fill(); }\n'
+    + '  else if (el.type === "image") { var im = imgs[el.id]; if (im && im.complete && im.naturalWidth) ctx.drawImage(im, el.x, el.y, el.w, el.h); }\n'
+    + '  else if (el.type === "bars") {\n'
+    + '    el.values.forEach(function (v, i) {\n'
+    + '      var pi = a.type === "none" ? 1 : easeOut(clamp((time - a.delay - i * el.stagger) / (a.dur || 0.01), 0, 1));\n'
+    + '      var bh = v / 100 * el.maxH * pi;\n'
+    + '      ctx.fillStyle = i === el.accentIndex ? el.accentColor : el.color;\n'
+    + '      ctx.fillRect(el.x + i * (el.barW + el.gap), el.y - bh, el.barW, bh);\n'
+    + '    });\n'
+    + '  }\n'
+    + '  ctx.restore();\n'
+    + '}\n'
+    + 'function render(t) {\n'
+    + '  ctx.fillStyle = CFG.bg; ctx.fillRect(0, 0, CFG.w, CFG.h);\n'
+    + '  for (var i = 0; i < CFG.elements.length; i++) drawEl(CFG.elements[i], t);\n'
+    + '  if (CFG.border) { ctx.strokeStyle = "#CCCCCC"; ctx.lineWidth = 1; ctx.strokeRect(0.5, 0.5, CFG.w - 1, CFG.h - 1); }\n'
+    + '}\n'
+    + 'var start = null, last = 0, FRAME = 1000 / 24;\n'  // 规范:24fps
+    + 'function loop(now) {\n'
+    + '  if (start === null) start = now;\n'
+    + '  var sec = (now - start) / 1000;\n'
+    + '  var done = !CFG.loop && sec >= CFG.duration + CFG.hold;\n'
+    + '  if (!done) requestAnimationFrame(loop);\n'
+    + '  if (now - last < FRAME && !done) return;\n'
+    + '  last = now;\n'
+    + '  if (CFG.loop) sec = sec % (CFG.duration + CFG.hold);\n'
+    + '  render(clamp(sec / CFG.duration, 0, 1));\n'
+    + '}\n'
+    + 'function startAnim() { requestAnimationFrame(loop); }\n'
+    + 'render(0);\n'                                    // 初始只画轻量静态首帧
+    + 'window.__adLoad = function (assets) {\n'         // subload 回调:图片就绪后才起动画
+    + '  var keys = [], k;\n'
+    + '  for (k in assets) keys.push(k);\n'
+    + '  var pending = keys.length;\n'
+    + '  if (!pending) { startAnim(); return; }\n'
+    + '  for (var i = 0; i < keys.length; i++) (function (key) {\n'
+    + '    var im = new Image();\n'
+    + '    im.onload = im.onerror = function () { if (--pending === 0) startAnim(); };\n'
+    + '    im.src = assets[key];\n'
+    + '    imgs[key] = im;\n'
+    + '  })(keys[i]);\n'
+    + '};\n'
+    + 'window.addEventListener("load", function () {\n' // 页面 load 后才加载动画资产
+    + (hasAssets
+      ? (inline
+        ? '  window.__adLoad(' + esc(JSON.stringify(assets)) + ');\n'
+        : '  var s = document.createElement("script");\n  s.async = true;\n  s.src = "assets.js";\n  document.body.appendChild(s);\n')
+      : '  startAnim();\n')
+    + '});\n'
+    + '})();\n<\/script>\n</body>\n</html>\n';
+  return { html, assetsJs: (hasAssets && !inline) ? 'window.__adLoad(' + esc(JSON.stringify(assets)) + ');\n' : null };
+}
+
+$('exportHtml5').onclick = async () => {
+  status.textContent = 'Building…'; status.className = '';
+  const { html, assetsJs } = buildAdHtml(!!state.singleFile);
+  const ec = document.createElement('canvas');           // 静态备份图:取所有元素都在场的最满一帧
+  ec.width = state.w; ec.height = state.h;
+  let backupSec = state.duration;
+  for (const el of state.elements) {
+    if (el.exit && el.exit.type !== 'none') backupSec = Math.min(backupSec, el.exit.start);
+  }
+  render(ec.getContext('2d'), clamp(Math.max(backupSec - 0.01, 0) / state.duration, 0, 1));
+  const png = await new Promise(r => ec.toBlob(r, 'image/png'));
+  const initU8 = strToU8(html);
+  const files = { 'index.html': initU8, 'backup.png': new Uint8Array(await png.arrayBuffer()) };
+  const subU8 = assetsJs ? strToU8(assetsJs) : null;
+  if (subU8) files['assets.js'] = subU8;
+  const zipped = zipSync(files, { level: 9 });
+  const initKb = initU8.length / 1024;                 // 初始加载 = index.html,限 100kb
+  const subKb = subU8 ? subU8.length / 1024 : 0;       // subload = assets.js,限 1MB
+  const zipKb = zipped.length / 1024;
+  const warnHttp = /^http:/i.test(state.clickUrl || '') ? ' — ⚠ click URL should be https' : '';
+  const over = initKb > 100 || subKb > 1024 || !!warnHttp;
+  status.textContent = `ad-html5.zip — initial ${initKb.toFixed(1)}/100 kb, subload ${subKb.toFixed(1)}/1024 kb (zip ${zipKb.toFixed(1)} kb)${warnHttp}`;
+  status.className = over ? 'over' : 'ok';
+  download(new Blob([zipped], { type: 'application/zip' }), 'ad-html5.zip');
+};
+
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+}
+
+// ---------- 启动 ----------
+resizeCanvas(); syncToolbar(); refreshSide();
+</script>
